@@ -1,0 +1,193 @@
+'use server';
+/**
+ * @fileoverview A flow that answers user questions about the museum.
+ *
+ * - getAnswer - A function that handles the question answering process.
+ * - FaqInput - The input type for the getAnswer function.
+ * - FaqOutput - The return type for the getAnswer function.
+ */
+
+import { ai } from '@/ai/genkit';
+import { z } from 'zod';
+
+const FaqInputSchema = z.object({
+  question: z.string().describe("The user's question."),
+  lang: z.string().describe('The language of the question (e.g., "en", "hi").'),
+});
+export type FaqInput = z.infer<typeof FaqInputSchema>;
+
+const FaqOutputSchema = z.object({
+  answer: z
+    .string()
+    .describe(
+      "The answer to the user's question. This will be displayed to the user."
+    ),
+  intent: z
+    .enum(['ANSWER', 'SWITCH_TO_BOOKING'])
+    .describe(
+      "The user's intent. If the user wants to book tickets, this should be 'SWITCH_TO_BOOKING'."
+    ),
+});
+
+export type FaqOutput = z.infer<typeof FaqOutputSchema>;
+
+export async function getAnswer(input: FaqInput): Promise<FaqOutput> {
+  return faqFlow(input);
+}
+
+const museumData = {
+  en: {
+    states: {
+      'Delhi': ['National Museum, New Delhi', 'National Rail Museum, New Delhi'],
+      'West Bengal': ['Indian Museum, Kolkata', 'Victoria Memorial, Kolkata'],
+      'Telangana': ['Salar Jung Museum, Hyderabad', 'Nizam Museum, Hyderabad'],
+      'Maharashtra': ['Chhatrapati Shivaji Maharaj Vastu Sangrahalaya, Mumbai', 'Dr. Bhau Daji Lad Museum, Mumbai'],
+      'Karnataka': ['Visvesvaraya Industrial & Technological Museum, Bengaluru', 'HAL Aerospace Museum, Bengaluru'],
+      'Tamil Nadu': ['Government Museum, Chennai', 'DakshinaChitra Museum, Chennai'],
+      'Rajasthan': ['Albert Hall Museum, Jaipur', 'City Palace Museum, Udaipur'],
+      'Uttar Pradesh': ['Anand Bhavan Museum, Prayagraj', 'Sarnath Museum, Varanasi'],
+      'Gujarat': ['Calico Museum of Textiles, Ahmedabad', 'Lakhota Museum, Jamnagar'],
+    },
+    times: ['10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM'],
+  },
+  hi: {
+    states: {
+      'दिल्ली': ['राष्ट्रीय संग्रहालय, नई दिल्ली', 'राष्ट्रीय रेल संग्रहालय, नई दिल्ली'],
+      'पश्चिम बंगाल': ['भारतीय संग्रहालय, कोलकाता', 'विक्टोरिया मेमोरियल, कोलकाता'],
+      'तेलंगाना': ['सालार जंग संग्रहालय, हैदराबाद', 'निज़ाम संग्रहालय, हैदराबाद'],
+      'महाराष्ट्र': ['छत्रपति शिवाजी महाराज वास्तु संग्रहालय, मुंबई', 'डॉ. भाऊ दाजी लाड संग्रहालय, मुंबई'],
+      'कर्नाटक': ['विश्वेश्वरैया औद्योगिक और तकनीकी संग्रहालय, बेंगलुरु', 'एचएएल एयरोस्पेस संग्रहालय, बेंगलुरु'],
+      'तमिलनाडु': ['सरकारी संग्रहालय, चेन्नई', 'दक्षिणचित्र संग्रहालय, चेन्नई'],
+      'राजस्थान': ['अल्बर्ट हॉल संग्रहालय, जयपुर', 'सिटी पैलेस संग्रहालय, उदयपुर'],
+      'उत्तर प्रदेश': ['आनंद भवन संग्रहालय, प्रयागराज', 'सारनाथ संग्रहालय, वाराणसी'],
+      'गुजरात': ['कैलिको म्यूजियम ऑफ टेक्सटाइल्स, अहमदाबाद', 'लाखोटा संग्रहालय, जामनगर'],
+    },
+    times: ['सुबह 10:00', 'दोपहर 12:00', 'दोपहर 2:00', 'शाम 4:00'],
+  },
+  bn: {
+    states: {
+        'দিল্লি': ['জাতীয় জাদুঘর, নতুন দিল্লি', 'জাতীয় রেল জাদুঘর, নতুন দিল্লি'],
+        'পশ্চিমবঙ্গ': ['ভারতীয় জাদুঘর, কলকাতা', 'ভিক্টোরিয়া মেমোরিয়াল, কলকাতা'],
+        'তেলেঙ্গানা': ['সালার জং জাদুঘর, হায়দ্রাবাদ', 'নিজাম জাদুঘর, হায়দ্রাবাদ'],
+        'মহারাষ্ট্র': ['ছত্রপতি শিবাজী মহারাজ वास्तु সংগ্রহালয়, মুম্বাই', 'ডঃ ভাউ দাজি লাড জাদুঘর, মুম্বাই'],
+        'কর্ণাটক': ['বিশ্বেশ্বরায় শিল্প ও প্রযুক্তিগত জাদুঘর, বেঙ্গালুরু', 'এইচএএল মহাকাশ জাদুঘর, বেঙ্গালুরু'],
+        'তামিলনাড়ু': ['সরকারি জাদুঘর, চেন্নাই', 'দক্ষিণচিত্র জাদুঘর, চেন্নাই'],
+        'রাজস্থান': ['অ্যালবার্ট হল জাদুঘর, জয়পুর', 'সিটি প্যালেস জাদুঘর, উদয়পুর'],
+        'উত্তরপ্রদেশ': ['আনন্দ ভবন জাদুঘর, প্রয়াগরাজ', 'সারনাথ জাদুঘর, বারাণসী'],
+        'গুজরাট': ['ক্যালিকো টেক্সটাইল মিউজিয়াম, আহমেদাবাদ', 'লাখোটা জাদুঘর, জামনগর'],
+    },
+    times: ['সকাল ১০:০০', 'দুপুর ১২:০০', 'দুপুর ২:০০', 'বিকাল ৪:০০'],
+  },
+  ta: {
+    states: {
+        'டெல்லி': ['தேசிய அருங்காட்சியகம், புது டெல்லி', 'தேசிய ரயில் அருங்காட்சியகம், புது டெல்லி'],
+        'மேற்கு வங்கம்': ['இந்திய அருங்காட்சியகம், கொல்கத்தா', 'விக்டோரியா நினைவிடம், கொல்கத்தா'],
+        'தெலுங்கானா': ['சாலார் ஜங் அருங்காட்சியகம், ஹைதராபாத்', 'நிஜாம் அருங்காட்சியகம், ஹைதராபாத்'],
+        'மகாராஷ்டிரா': ['சத்ரபதி சிவாஜி மகாராஜ் ವಸ್ತು சங்கராலயா, மும்பை', 'டாக்டர் பாவ் தாஜி லாட் அருங்காட்சியகம், மும்பை'],
+        'கர்நாடகா': ['விஸ்வேஸ்வரயா தொழில்துறை மற்றும் தொழில்நுட்ப அருங்காட்சியகம், பெங்களூரு', 'எச்ஏஎல் ஏரோஸ்பேஸ் அருங்காட்சியகம், பெங்களூரு'],
+        'தமிழ்நாடு': ['அரசு அருங்காட்சியகம், சென்னை', 'தட்சிணசித்ரா அருங்காட்சியகம், சென்னை'],
+        'ராஜஸ்தான்': ['ஆல்பர்ட் ஹால் அருங்காட்சியகம், ஜெய்ப்பூர்', 'நகர அரண்மனை அருங்காட்சியகம், உதய்பூர்'],
+        'உத்தரப்பிரதேசம்': ['ஆனந்த பவன் அருங்காட்சியகம், பிரயாக்ராஜ்', 'சாரநாத் அருங்காட்சியகம், வாரணாசி'],
+        'குஜராத்': ['காலிகோ டெக்ஸ்டைல்ஸ் அருங்காட்சியகம், அகமதாபாத்', 'லகோடா அருங்காட்சியகம், ஜாம்நகர்'],
+    },
+    times: ['காலை 10:00', 'மதியம் 12:00', 'மதியம் 2:00', 'மாலை 4:00'],
+  },
+  te: {
+    states: {
+        'ఢిల్లీ': ['జాతీయ మ్యూజియం, న్యూఢిల్లీ', 'నేషనల్ రైల్ మ్యూజియం, న్యూఢిల్లీ'],
+        'పశ్చిమ బెంగాల్': ['ఇండియన్ మ్యూజియం, కోల్‌కతా', 'విక్టోరియా మెమోరియల్, కోల్‌కతా'],
+        'తెలంగాణ': ['సాలార్ జంగ్ మ్యూజియం, హైదరాబాద్', 'నిజాం మ్యూజియం, హైదరాబాద్'],
+        'మహారాష్ట్ర': ['ఛత్రపతి శివాజీ మహారాజ్ వాస్తు సంగ్రహాలయం, ముంబై', 'డా. भाऊ దాజీ లాడ్ మ్యూజియం, ముంబై'],
+        'కర్ణాటక': ['విశ్వేశ్వరయ్య ఇండస్ట్రియల్ & టెక్నలాజికల్ మ్యూజియం, బెంగళూరు', 'HAL ఏరోస్పేస్ మ్యూజియం, బెంగళూరు'],
+        'తమిళనాడు': ['ప్రభుత్వ మ్యూజియం, చెన్నై', 'దక్షిణచిత్ర మ్యూజియం, చెన్నై'],
+        'రాజస్థాన్': ['ఆల్బర్ట్ హాల్ మ్యూజియం, జైపూర్', 'సిటీ ప్యాలెస్ మ్యూజియం, ఉదయపూర్'],
+        'ఉత్తర ప్రదేశ్': ['ఆనంద్ భవన్ మ్యూజియం, ప్రయాగ్‌రాజ్', 'సారనాథ్ మ్యూజియం, వారణాసి'],
+        'గుజరాత్': ['కాలికో మ్యూజియం ఆఫ్ టెక్స్‌టైల్స్, అహ్మదాబాద్', 'లఖోటా మ్యూజియం, జామ్‌నగర్'],
+    },
+    times: ['ఉదయం 10:00', 'మధ్యాహ్నం 12:00', 'మధ్యాహ్నం 2:00', 'సాయంత్రం 4:00'],
+  },
+  kn: {
+    states: {
+        'ದೆಹಲಿ': ['ರಾಷ್ಟ್ರೀಯ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ನವದೆಹಲಿ', 'ರಾಷ್ಟ್ರೀಯ ರೈಲು ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ನವದೆಹಲಿ'],
+        'ಪಶ್ಚಿಮ ಬಂಗಾಳ': ['ಭಾರತೀಯ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ಕೋಲ್ಕತ್ತಾ', 'ವಿಕ್ಟೋರಿಯಾ ಸ್ಮಾರಕ, ಕೋಲ್ಕತ್ತಾ'],
+        'ತೆಲಂಗಾಣ': ['ಸಾಲಾರ್ ಜಂಗ್ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ಹೈದರಾಬಾದ್', 'ನಿಜಾಮ್ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ಹೈದರಾಬಾದ್'],
+        'ಮಹಾರಾಷ್ಟ್ರ': ['ಛತ್ರಪತಿ ಶಿವಾಜಿ ಮಹಾರಾಜ್ ವಸ್ತು ಸಂಗ್ರಹಾಲಯ, ಮುಂಬೈ', 'ಡಾ. ಭಾವು ದಾಜಿ ಲಾಡ್ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ಮುಂಬೈ'],
+        'ಕರ್ನಾಟಕ': ['ವಿಶ್ವೇಶ್ವರಯ್ಯ ಕೈಗಾರಿಕಾ ಮತ್ತು ತಾಂತ್ರಿಕ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ಬೆಂಗಳೂರು', 'ಎಚ್‌ಎಎಲ್ ಏರೋಸ್ಪೇಸ್ ಮ್ಯೂಸಿಯಂ, ಬೆಂಗಳೂರು'],
+        'ತಮಿಳುನಾಡು': ['ಸರ್ಕಾರಿ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ಚೆನ್ನೈ', 'ದಕ್ಷಿಣಚಿತ್ರ ಮ್ಯೂಸಿಯಂ, ಚೆನ್ನೈ'],
+        'ರಾಜಸ್ಥಾನ': ['ಆಲ್ಬರ್ಟ್ ಹಾಲ್ ಮ್ಯೂಸಿಯಂ, ಜೈಪುರ', 'ಸಿಟಿ ಪ್ಯಾಲೇಸ್ ಮ್ಯೂಸಿಯಂ, ಉದಯಪುರ'],
+        'ಉತ್ತರ ಪ್ರದೇಶ': ['ಆನಂದ ಭವನ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ಪ್ರಯಾಗ್‌ರಾಜ್', 'ಸಾರನಾಥ ವಸ್ತುಸಂಗ್ರಹಾಲಯ, ವಾರಣಾಸಿ'],
+        'ಗುಜರಾತ್': ['ಕ್ಯಾಲಿಕೊ ಮ್ಯೂಸಿಯಂ ಆಫ್ ಟೆಕ್ಸ್‌ಟೈಲ್ಸ್, ಅಹಮದಾಬಾದ್', 'ಲಖೋಟಾ ಮ್ಯೂಸಿಯಂ, ಜಾಮ್‌ನಗರ'],
+    },
+    times: ['ಬೆಳಿಗ್ಗೆ 10:00', 'ಮಧ್ಯಾಹ್ನ 12:00', 'ಮಧ್ಯಾಹ್ನ 2:00', 'ಸಂಜೆ 4:00'],
+  },
+};
+
+const prompt = ai.definePrompt({
+  name: 'faqPrompt',
+  input: {
+    schema: z.object({
+      ...FaqInputSchema.shape,
+      museums: z.string(),
+      times: z.string(),
+    }),
+  },
+  output: { schema: FaqOutputSchema },
+  prompt: `You are a friendly and conversational AI assistant for a museum booking app called "Museum Buddy". Your primary role is to answer user questions.
+
+You have access to the following information about the museums. Use this data to answer questions about museum lists, locations, and timings.
+
+Museum Data:
+Museums: {{{museums}}}
+Times: {{{times}}}
+
+- If the user's question is about booking or purchasing tickets, or they say "switch to ticket booking", set the intent to 'SWITCH_TO_BOOKING' and provide a short confirmation message in the 'answer' field (e.g., "Switching to ticket booking...").
+- For all other questions (including greetings), set the intent to 'ANSWER'.
+- If the user asks for a list of museums, provide the list from the data above.
+- If the user asks about timings, provide the available time slots.
+- For all other general questions (e.g., "what is machine learning?", "who is the president?"), answer them as a general knowledge AI.
+- If the user greets you, respond with a friendly greeting.
+
+Answer in the same language as the original question.
+        
+Question: {{{question}}}
+Language: {{{lang}}}
+        
+Keep your answer concise and helpful.`,
+});
+
+const faqFlow = ai.defineFlow(
+  {
+    name: 'faqFlow',
+    inputSchema: FaqInputSchema,
+    outputSchema: FaqOutputSchema,
+  },
+  async (input) => {
+    const langData = museumData[input.lang as keyof typeof museumData] || museumData.en;
+    
+    const promptInput = {
+      ...input,
+      museums: JSON.stringify(langData.states),
+      times: JSON.stringify(langData.times),
+    };
+
+    const { output } = await prompt(promptInput);
+
+    if (output) {
+      return output;
+    }
+
+    const fallbackMessages = {
+      en: "I'm sorry, I don't understand your question. Could you please rephrase it?",
+      hi: 'मुझे क्षमा करें, मैं आपके प्रश्न को समझ नहीं पाया। क्या आप कृपया इसे फिर से लिख सकते हैं?',
+      bn: 'আমি দুঃখিত, আমি আপনার প্রশ্ন বুঝতে পারিনি। আপনি কি দয়া করে এটি পুনরায় বলতে পারেন?',
+      ta: 'மன்னிக்கவும், உங்கள் கேள்வி எனக்குப் புரியவில்லை. தயவுசெய்து அதை வேறுவிதமாகக் கேட்க முடியுமா?',
+      te: 'క్షమించండి, మీ ప్రశ్న నాకు అర్థం కాలేదు. దయచేసి దాన్ని మళ్లీ చెప్పగలరా?',
+      kn: 'ಕ್ಷಮಿಸಿ, ನನಗೆ ನಿಮ್ಮ ಪ್ರಶ್ನೆ ಅರ್ಥವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಅದನ್ನು ಬೇರೆ ರೀತಿಯಲ್ಲಿ ಕೇಳಬಹುದೇ?',
+    };
+
+    return {
+      answer: fallbackMessages[input.lang as keyof typeof fallbackMessages] || fallbackMessages.en,
+      intent: 'ANSWER' as const,
+    }
+  }
+);

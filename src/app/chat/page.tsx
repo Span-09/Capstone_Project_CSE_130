@@ -1,0 +1,22 @@
+import ChatInterface from '@/components/chat/chat-interface';
+import { Suspense } from 'react';
+
+function ChatPageContent({ lang }: { lang?: string }) {
+  const validLangs = ['en', 'hi', 'bn', 'ta', 'te', 'kn'];
+  const validLang = lang && validLangs.includes(lang) ? lang as 'en' | 'hi' | 'bn' | 'ta' | 'te' | 'kn' : 'en';
+  return <ChatInterface lang={validLang} />;
+}
+
+export default function ChatPage({
+  searchParams,
+}: {
+  searchParams: { [key: string]: string | string[] | undefined };
+}) {
+  const lang = typeof searchParams.lang === 'string' ? searchParams.lang : 'en';
+  
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ChatPageContent lang={lang} />
+    </Suspense>
+  );
+}
